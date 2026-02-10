@@ -1,0 +1,215 @@
+#########################################################################
+# BIOMARKERS: OVT/CALP vs COCCIDIOSIS LESIONS
+#########################################################################
+
+## ------------------------------
+## 0) Load Packages & data
+## ------------------------------
+library(readxl)
+library(dplyr)
+library(janitor)
+library(stringr)
+library(MASS)
+
+file_path <- "20260203_biomarker_ls.xlsx"
+
+# Helper function to fix commas in European numbers (e.g., "1,5" -> 1.5)
+to_num_eu <- function(x) suppressWarnings(as.numeric(str_replace(as.character(x), ",", ".")))
+
+bio <- read_xlsx(file_path) %>% 
+  janitor::clean_names() %>%
+  mutate(
+    farm    = factor(house), 
+    day_f   = factor(day),
+    day_num = suppressWarnings(as.numeric(as.character(day))),
+    
+    # Raw numeric conversion
+    ovt_raw  = to_num_eu(ovt_avg_conc_mg_ml),
+    calp_raw = to_num_eu(calp_avg_conc_ug_ml),
+    
+    # Cleaning Lesion Scores (LS) per species
+    sum_A = suppressWarnings(as.numeric(ls_ac)),
+    sum_M = suppressWarnings(as.numeric(ls_max)),
+    sum_T = suppressWarnings(as.numeric(na_if(ls_ten_cor, "mv"))),
+    
+    # -------------------------------------------------------------------
+    # WHY LOG10?
+    # Biomarker data is skewed and most birds have low levels, and a 
+    # few sick birds have huge spikes
+    # -------------------------------------------------------------------
+    log10_ovt  = log10(ovt_raw),
+    log10_calp = log10(calp_raw)
+  )
+
+# =========================================================================
+# PART A: DIAGNOSTIC MODELS 
+# =========================================================================
+# DIRECTION: Blood evidence -> prediction of gut dmg
+# OUTCOME VARIABLE: LS 
+# EXPLANATORY VARIABLE: Biomarker OVT/CALP Log10
+#
+# This ist o see if a simple blood test can replace the need for 
+# opening the bird to check for lesions. These biomarkers aren't specific to Eimeria, we don't use them to confirm coccidiosis. We can use them for early detection. For example, if 10% of birds in house suddenly show a spike in OVT, then we know something is wrong.
+# =========================================================================
+
+# We remove Day 36 because all lesions were 0. We can't predict something that never changes
+bio_diag <- bio %>% filter(day_num != 36, !is.na(sum_T)) %>%
+  mutate(ls_ten_ord = factor(sum_T, ordered = TRUE))
+
+# Diagnostic Model 1: Can OVT predict Tenella severity?
+model_diag_ovt <- polr(ls_ten_ord ~ log10_ovt + day_f, data = bio_diag, Hess = TRUE)
+summary(model_diag_ovt)
+
+# Diagnostic Model 2: Can CALP predict Tenella severity?
+model_diag_calp <- polr(ls_ten_ord ~ log10_calp + day_f, data = bio_diag, Hess = TRUE)
+summary(model_diag_calp)
+
+# =========================================================================
+# PART B: BIOLOGICAL MODELS 
+# =========================================================================
+# DIRECTION: Physical damage of gut -> immune response
+# OUTCOME VARIABLE: Biomarker Log10 
+# EXPLANATORY VARIABLES: LS 
+#
+# This is to prove which Eimeria species actually "causes" the leakage
+# of these proteins into the blood.
+# =========================================================================
+
+## --- OVOTRANSFERRIN ---
+bio_ovt <- bio %>% filter(!is.na(log10_ovt), !is.na(sum_A), !is.na(sum_M), !is.na(sum_T))
+
+# 1. We test ALL species. 
+# "drop1" checks if I delete this species, does the model fall apart?
+model_ovt_full <- lm(log10_ovt ~ day_num + farm + sum_A + sum_M + sum_T, data = bio_ovt)
+print("--- Check which species drive OVT ---")
+drop1(model_ovt_full, test = "F") 
+
+# 2. BEST OVT MODEL: Only Tenella and Farm were significant,
+# I drop Acervulina and Maxima because they don't affect OVT levels.
+model_ovt_best <- lm(log10_ovt ~ farm + sum_T, data = bio_ovt)
+summary(model_ovt_best)
+
+
+## --- CALPROTECTIN ---
+bio_calp <- bio %>% filter(!is.na(log10_calp), !is.na(sum_A), !is.na(sum_M), !is.na(sum_T))
+
+# 1. Again, we test all species.
+model_calp_full <- lm(log10_calp ~ day_num + farm + sum_A + sum_M + sum_T, data = bio_calp)
+print("--- Check which species drive CALP ---")
+drop1(model_calp_full, test = "F") 
+
+# 2. BEST CALP MODEL based on drop1 function
+# This shows CALP is a broader marker of gut inflammation than OVT.
+# I drop Farm/Day because they didn't explain CALP at all.
+model_calp_best <- lm(log10_calp ~ sum_M + sum_T, data = bio_calp)
+summary(model_calp_best)
+
+#########################################################################
+# END OF MODELS
+#########################################################################
+# VISUALIZATIONS and DATA CHECK
+#########################################################################
+
+## -----------------------------------------------------------------------
+## SECTION 1: Data normality & transformations
+## -----------------------------------------------------------------------
+
+par(mfrow = c(2, 2)) 
+
+# OVT Checks
+hist(bio$ovt_raw, main="Raw OVT: Heavily skewed", xlab="mg/ml", col="gray")
+qqnorm(bio$log10_ovt, main="Log10 OVT: Normal distribution")
+qqline(bio$log10_ovt, col="blue")
+
+# CALP Checks
+hist(bio$calp_raw, main="Raw CALP: Heavily skewed", xlab="ug/ml", col="gray")
+qqnorm(bio$log10_calp, main="Log10 CALP: Normal distribution")
+qqline(bio$log10_calp, col="blue")
+
+par(mfrow = c(1, 1))
+
+## -----------------------------------------------------------------------
+## SECTION 2: Outliers & validation
+## -----------------------------------------------------------------------
+# After running the 'best' models, we check if any specific birds 
+# "broke" the model (Cook's Distance).
+
+# Step 1: Visual validation of the OVT model residuals
+par(mfrow = c(1, 2))
+plot(model_ovt_best, which = 1, main="Residuals vs Fitted")
+plot(model_ovt_best, which = 2, main="Normal Q-Q of Residuals")
+par(mfrow = c(1, 1))
+
+# Step 2: Automated outlier detection (Cook's Distance)
+model_data <- model_ovt_best$model
+cooks_d <- cooks.distance(model_ovt_best)
+outliers <- bio_ovt[as.numeric(names(cooks_d[cooks_d > (4/nrow(model_data))])), ]
+
+print("--- Comparison: High-Influence Birds (Outliers) ---")
+outliers %>%
+  dplyr::select(sample, house, day, ovt_raw, sum_T, sum_A, sum_M) %>%
+  print()
+
+## -----------------------------------------------------------------------
+## SECTION 3.1: FINAL VISUALIZATION (OVT) - FIXED
+## -----------------------------------------------------------------------
+
+bio_plot_ovt <- bio %>%
+  filter(!is.na(sum_T)) %>% 
+  mutate(
+    status = case_when(
+      day_num == 36 & ovt_raw > 5 ~ "D36 Recovery Lag",
+      ovt_raw > 8 ~ "Severe Inflammatory Response",
+      TRUE ~ "Expected Range (<5 mg/ml)"
+    )
+  )
+
+ggplot(bio_plot_ovt, aes(x = factor(sum_T), y = ovt_raw, color = status)) +
+  geom_jitter(width = 0.2, size = 3, alpha = 0.7) +
+  # Reference line 
+  geom_hline(yintercept = 5, linetype = "dashed", color = "grey50") +
+  scale_x_discrete(limits = c("0", "1", "2", "3", "4")) + 
+  scale_color_manual(values = c("D36 Recovery Lag" = "orange", 
+                                "Severe Inflammatory Response" = "red", 
+                                "Expected Range (<5 mg/ml)" = "steelblue")) +
+  theme_minimal() +
+  labs(
+    title = "Serum OVT vs. E. tenella LS",
+    subtitle = "Reference line at 5 mg/ml indicates active inflammatory threshold",
+    x = "E. tenella LS (0-4)",
+    y = "Raw serum OVT (mg/ml)",
+    color = "Clinical Status"
+  ) +
+  theme(legend.position = "bottom")
+
+
+## -----------------------------------------------------------------------
+## SECTION 3.2: FINAL VISUALIZATION (CALP) - FIXED
+## -----------------------------------------------------------------------
+
+bio_plot_calp <- bio %>%
+  filter(!is.na(sum_T)) %>% 
+  mutate(
+    status = case_when(
+      day_num == 36 & calp_raw > 40 ~ "D36 Recovery Lag",
+      calp_raw > 70 ~ "Severe Inflammatory Response",
+      TRUE ~ "Expected Range (<40 ug/ml)"
+    )
+  )
+
+ggplot(bio_plot_calp, aes(x = factor(sum_T), y = calp_raw, color = status)) +
+  geom_jitter(width = 0.2, size = 3, alpha = 0.7) +
+  geom_hline(yintercept = 40, linetype = "dashed", color = "grey50") +
+  scale_x_discrete(limits = c("0", "1", "2", "3", "4")) + 
+  scale_color_manual(values = c("D36 Recovery Lag" = "orange", 
+                                "Severe Inflammatory Response" = "red", 
+                                "Expected Range (<40 ug/ml)" = "darkgreen")) + 
+  theme_minimal() +
+  labs(
+    title = "Serum CALP vs. E. tenella LS",
+    subtitle = "Reference line at 40 ug/ml indicates active inflammatory threshold",
+    x = "E. tenella LS (0-4)",
+    y = "Raw serum CALP (ug/ml)",
+    color = "Clinical Status"
+  ) + 
+  theme(legend.position = "bottom")
