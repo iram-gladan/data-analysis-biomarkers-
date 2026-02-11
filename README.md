@@ -21,13 +21,12 @@ data-analysis-biomarkers-/
 - 20260203_biomarker_ls.xlsx         # Input dataset
 - README.md
 ```
-
-
 ---
 
 ## Requirements
 
-- R (recommended: R 4.2+)
+- R (recommended: R version 4.5.0 2025-04-11 ucrt) 
+
 - R packages:
   - `readxl`
   - `dplyr`
@@ -41,6 +40,71 @@ Install packages in R:
 
 ```r
 install.packages(c("readxl","dplyr","janitor","stringr","MASS","ggplot2","here"))
+
+```
+Load them in the script
+
+```
+library(readxl)
+library(dplyr)
+library(janitor)
+library(stringr)
+library(MASS)
+library(ggplot2)
+library(here)
+```
+
+Then run 
+
+```source("biomarkers_ovt_calp_vs_lesions.R")
+```
+
+## Reproducibility with `renv`
+
+This project uses `renv` to ensure reproducible package versions.  
+The `renv.lock` file records the exact package versions used in the analysis.
+
+---
+
+### For collabroators (after cloning the repository)
+
+Run the following in R:
+
+```r
+install.packages("renv")
+renv::restore()
+```
+
+This will:
+- Install all required packages
+- Match the exact versions stored in `renv.lock`
+- Create a project-specific library
+
+---
+
+### For project maintainer
+
+If you install new packages or update existing ones, run:
+
+```r
+renv::snapshot()
+```
+
+This updates the `renv.lock` file.  
+Commit the updated `renv.lock` file to GitHub.
+
+---
+
+### First-time setup (if `renv` has not been initialized)
+
+From the project root directory:
+
+```r
+install.packages("renv")
+renv::init()
+renv::snapshot()
+```
+
 
 
  
