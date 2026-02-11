@@ -99,6 +99,8 @@ renv::init()
 renv::snapshot()
 ```
 
+<img src="./results/Mlog_box_plot.png">
+
 
 
  
