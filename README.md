@@ -13,13 +13,14 @@ It includes:
 - Linear models (biological perspective): which lesion scores and factors explain biomarker variation?
 - Basic diagnostic checks and two jitter plots for interpretation
 - To download the script via Github:
-git clone <git@github.com:iram-gladan/data-analysis-biomarkers-.git>
+`git clone https://github.com/iram-gladan/data-analysis-biomarkers-.git`
 - Project structure: 
+```
 data-analysis-biomarkers-/
-│
-├── biomarkers_ovt_calp_vs_lesions.R   # Main analysis script
-├── 20260203_biomarker_ls.xlsx         # Input dataset
-└── README.md
+- biomarkers_ovt_calp_vs_lesions.R   # Main analysis script
+- 20260203_biomarker_ls.xlsx         # Input dataset
+- README.md
+```
 
 
 ---
