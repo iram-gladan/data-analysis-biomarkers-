@@ -53,12 +53,6 @@ library(MASS)
 library(ggplot2)
 library(here)
 ```
-
-Then run 
-
-```source("biomarkers_ovt_calp_vs_lesions.R")
-```
-
 ## Reproducibility with `renv`
 
 This project uses `renv` to ensure reproducible package versions.  
